@@ -1,0 +1,1118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TSP: Manhattan Real-Road Routing</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #0a0c10;
+  --panel: #10131a;
+  --border: #1e2535;
+  --accent-green: #00e5a0;
+  --accent-red: #ff3b5c;
+  --accent-blue: #3b8eff;
+  --accent-amber: #ffb800;
+  --text-primary: #e8eaf0;
+  --text-muted: #5a6278;
+  --text-dim: #8a94b0;
+  --greedy-color: #ff3b5c;
+  --aco-color: #00e5a0;
+  --font-mono: 'Courier New', monospace;
+  --font-ui: system-ui, -apple-system, sans-serif;
+}
+
+html, body { height: 100%; background: var(--bg); color: var(--text-primary); font-family: var(--font-ui); overflow: hidden; }
+#app { display: flex; flex-direction: column; height: 100vh; }
+
+#header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 20px; background: var(--panel);
+  border-bottom: 1px solid var(--border); flex-shrink: 0; gap: 16px; flex-wrap: wrap;
+}
+#header-title { display: flex; flex-direction: column; gap: 2px; }
+#header-title h1 { font-size: 13px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-primary); }
+#header-title p  { font-size: 10px; color: var(--text-muted); letter-spacing: 0.08em; text-transform: uppercase; }
+
+#controls { display: flex; align-items: center; gap: 18px; flex: 1; justify-content: center; flex-wrap: wrap; }
+.ctrl-group { display: flex; flex-direction: column; gap: 3px; min-width: 110px; }
+.ctrl-label { font-size: 9px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-muted); }
+.ctrl-row { display: flex; align-items: center; gap: 6px; }
+.ctrl-sub { font-size: 8px; color: var(--text-muted); white-space: nowrap; }
+.ctrl-val { font-size: 10px; font-weight: 700; font-family: var(--font-mono); color: var(--accent-amber); min-width: 28px; text-align: right; }
+
+input[type="range"] { -webkit-appearance: none; height: 3px; border-radius: 2px; background: var(--border); outline: none; flex: 1; cursor: pointer; }
+input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 10px; height: 10px; border-radius: 50%; background: var(--accent-green); cursor: pointer; border: 1px solid var(--bg); }
+input[type="range"]::-moz-range-thumb { width: 10px; height: 10px; border-radius: 50%; background: var(--accent-green); cursor: pointer; border: none; }
+
+.btn { padding: 7px 16px; border: none; border-radius: 4px; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; cursor: pointer; transition: opacity 0.15s, transform 0.1s; }
+.btn:hover:not(:disabled) { opacity: 0.85; transform: translateY(-1px); }
+.btn:active:not(:disabled) { transform: translateY(0); }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn-start { background: var(--accent-green); color: #000; min-width: 120px; }
+.btn-reset { background: transparent; color: var(--accent-red); border: 1px solid var(--accent-red); }
+.btn-regen { background: transparent; color: var(--accent-blue); border: 1px solid var(--accent-blue); }
+
+#status-badge { display: flex; align-items: center; gap: 6px; font-size: 10px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-muted); flex-shrink: 0; }
+#status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-muted); transition: background 0.3s, box-shadow 0.3s; }
+#status-dot.active { background: var(--accent-green); box-shadow: 0 0 6px var(--accent-green); animation: pulse 1.2s ease-in-out infinite; }
+#status-dot.loading { background: var(--accent-amber); box-shadow: 0 0 6px var(--accent-amber); animation: pulse 0.6s ease-in-out infinite; }
+@keyframes pulse { 0%,100%{opacity:1}50%{opacity:0.4} }
+
+/* Loading overlay */
+#loading-overlay {
+  position: fixed; inset: 0; background: rgba(10,12,16,0.92);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  z-index: 9999; gap: 16px;
+}
+#loading-overlay.hidden { display: none; }
+#loading-title { font-size: 12px; font-weight: 700; letter-spacing: 0.15em; text-transform: uppercase; color: var(--accent-amber); }
+#loading-bar-wrap { width: 280px; height: 3px; background: var(--border); border-radius: 2px; overflow: hidden; }
+#loading-bar { height: 100%; background: var(--accent-amber); width: 0%; transition: width 0.2s; border-radius: 2px; }
+#loading-detail { font-size: 10px; color: var(--text-muted); font-family: var(--font-mono); }
+#loading-eta { font-size: 9px; color: var(--text-muted); margin-top: 2px; }
+
+#maps-area { display: flex; flex: 1; overflow: hidden; }
+.map-wrapper { flex: 1; display: flex; flex-direction: column; position: relative; overflow: hidden; }
+.map-wrapper:first-child { border-right: 1px solid var(--border); }
+
+.map-label {
+  position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+  z-index: 1000; background: rgba(10,12,16,0.88); border: 1px solid var(--border);
+  padding: 4px 12px; border-radius: 3px; font-size: 9px; font-weight: 700;
+  letter-spacing: 0.12em; text-transform: uppercase; white-space: nowrap; pointer-events: none;
+}
+.map-label.greedy { color: var(--greedy-color); border-color: rgba(255,59,92,0.3); }
+.map-label.aco    { color: var(--aco-color);    border-color: rgba(0,229,160,0.3); }
+
+.map-container { flex: 1; width: 100%; }
+
+.stats-panel { background: rgba(10,12,16,0.9); border-top: 1px solid var(--border); padding: 6px 12px; display: flex; gap: 16px; flex-wrap: wrap; flex-shrink: 0; }
+.stat-item { display: flex; flex-direction: column; gap: 1px; }
+.stat-label { font-size: 8px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-muted); }
+.stat-value { font-size: 13px; font-weight: 700; font-family: var(--font-mono); color: var(--text-primary); min-width: 80px; }
+.stat-value.highlight-greedy { color: var(--greedy-color); }
+.stat-value.highlight-aco    { color: var(--aco-color); }
+
+/* Leaflet overrides */
+.leaflet-container { background: #0d1117 !important; font-family: var(--font-ui) !important; }
+.leaflet-control-attribution { font-size: 8px !important; background: rgba(10,12,16,0.7) !important; color: var(--text-muted) !important; }
+.leaflet-control-attribution a { color: var(--text-muted) !important; }
+.leaflet-control-zoom a { background: var(--panel) !important; color: var(--text-dim) !important; border-color: var(--border) !important; }
+.leaflet-control-zoom a:hover { background: var(--border) !important; color: var(--text-primary) !important; }
+
+.greedy-cursor-dot {
+  width: 10px; height: 10px; border-radius: 50%;
+  background: #ff3b5c;
+  box-shadow: 0 0 10px #ff3b5c, 0 0 20px rgba(255,59,92,0.4);
+  border: 2px solid #fff;
+}
+.agent-dot { border-radius: 50%; border: 1px solid rgba(255,255,255,0.25); }
+
+/* Node count badge on slider */
+#node-req-hint { font-size: 8px; color: var(--text-muted); white-space: nowrap; font-family: var(--font-mono); }
+#node-req-hint.warn { color: var(--accent-amber); }
+#node-req-hint.danger { color: var(--accent-red); }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- Loading overlay -->
+  <div id="loading-overlay">
+    <div id="loading-title">Fetching Real Road Routes via OSRM</div>
+    <div id="loading-bar-wrap"><div id="loading-bar"></div></div>
+    <div id="loading-detail">Preparing…</div>
+    <div id="loading-eta"></div>
+  </div>
+
+  <div id="header">
+    <div id="header-title">
+      <h1>TSP Logistics Optimizer</h1>
+      <p id="header-sub">·· · Manhattan Real-Road · Sequential vs Stigmergy · ··</p>
+    </div>
+    <div id="controls">
+
+      <!-- Node count -->
+      <div class="ctrl-group" style="min-width:140px">
+        <div class="ctrl-label">Node Count</div>
+        <div class="ctrl-row">
+          <span class="ctrl-sub">5</span>
+          <input type="range" id="node-count" min="5" max="30" value="15">
+          <span class="ctrl-sub">30</span>
+          <span class="ctrl-val" id="node-count-val">15</span>
+        </div>
+        <div id="node-req-hint">~105 road requests</div>
+      </div>
+
+      <!-- Sim speed -->
+      <div class="ctrl-group">
+        <div class="ctrl-label">Sim Speed</div>
+        <div class="ctrl-row">
+          <span class="ctrl-sub">Low</span>
+          <input type="range" id="sim-speed" min="1" max="20" value="8">
+          <span class="ctrl-sub">High</span>
+        </div>
+      </div>
+
+      <!-- Greedy compute speed -->
+      <div class="ctrl-group">
+        <div class="ctrl-label">Greedy Speed</div>
+        <div class="ctrl-row">
+          <span class="ctrl-sub">Slow</span>
+          <input type="range" id="greedy-speed" min="1" max="20" value="6">
+          <span class="ctrl-sub">Fast</span>
+        </div>
+      </div>
+
+      <!-- Evaporation -->
+      <div class="ctrl-group">
+        <div class="ctrl-label">Evaporation</div>
+        <div class="ctrl-row">
+          <span class="ctrl-sub">Low</span>
+          <input type="range" id="evap-rate" min="1" max="20" value="6">
+          <span class="ctrl-sub">High</span>
+        </div>
+      </div>
+
+      <button class="btn btn-regen" id="btn-regen">⟳ New Nodes</button>
+      <button class="btn btn-start" id="btn-start" disabled>▶ Start</button>
+      <button class="btn btn-reset" id="btn-reset">↺ Reset</button>
+    </div>
+
+    <div id="status-badge">
+      <div id="status-dot"></div>
+      <span id="status-text">Initializing…</span>
+    </div>
+  </div>
+
+  <div id="maps-area">
+    <div class="map-wrapper">
+      <div class="map-label greedy">Greedy + 2-opt · Real-Road Distance</div>
+      <div id="map-greedy" class="map-container"></div>
+      <div class="stats-panel">
+        <div class="stat-item"><div class="stat-label">Edges Checked</div><div class="stat-value highlight-greedy" id="g-edges">0</div></div>
+        <div class="stat-item"><div class="stat-label">Current Dist</div><div class="stat-value" id="g-current">—</div></div>
+        <div class="stat-item"><div class="stat-label">Best Route</div><div class="stat-value highlight-greedy" id="g-best">—</div></div>
+        <div class="stat-item"><div class="stat-label">Nodes Visited</div><div class="stat-value" id="g-nodes">0</div></div>
+        <div class="stat-item"><div class="stat-label">Phase</div><div class="stat-value" id="g-phase">Idle</div></div>
+      </div>
+    </div>
+
+    <div class="map-wrapper">
+      <div class="map-label aco">ACO Stigmergy · Real-Road Distance</div>
+      <div id="map-aco" class="map-container"></div>
+      <div class="stats-panel">
+        <div class="stat-item"><div class="stat-label">Active Agents</div><div class="stat-value highlight-aco" id="a-agents">0</div></div>
+        <div class="stat-item"><div class="stat-label">Iterations</div><div class="stat-value" id="a-iters">0</div></div>
+        <div class="stat-item"><div class="stat-label">Best Route</div><div class="stat-value highlight-aco" id="a-best">—</div></div>
+        <div class="stat-item"><div class="stat-label">Convergence</div><div class="stat-value" id="a-conv">0%</div></div>
+        <div class="stat-item"><div class="stat-label">Pheromone Peak</div><div class="stat-value" id="a-pheromone">0.00</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// =============================================
+// CONFIG
+// =============================================
+const NUM_AGENTS = 10;
+const AGENT_COLORS = [
+  '#00e5a0','#3b8eff','#ffb800','#ff6b35','#c77dff',
+  '#f72585','#4cc9f0','#7bf1a8','#ffd60a','#e0aaff'
+];
+
+// Manhattan grid-snapped clusters (intersections ~every 0.0028° lat, 0.0020° lng)
+const GRID_LAT = 0.0028;
+const GRID_LNG = 0.0020;
+
+const NODE_BOUNDS = {
+  minLat: 40.720, maxLat: 40.762,
+  minLng: -74.004, maxLng: -73.972
+};
+const CENTER = [40.741, -73.988];
+const ZOOM   = 14;
+
+// OSRM public endpoint
+const OSRM_BASE = 'https://router.project-osrm.org/route/v1/driving';
+
+let mapG = null, mapA = null;
+let running = false, animFrame = null;
+let nodes = [];           // [lat, lng][]
+let roadCache = {};       // edgeKey -> { dist, coords: [[lat,lng]...] }
+let NUM_NODES = 15;
+
+let gState = {};
+let aState = {};
+
+// =============================================
+// UTILS
+// =============================================
+function rnd(lo, hi) { return Math.random() * (hi - lo) + lo; }
+function edgeKey(i, j) { return i < j ? `${i}-${j}` : `${j}-${i}`; }
+function fmt(m) {
+  if (!isFinite(m) || m === 0) return '—';
+  return m >= 1000 ? (m/1000).toFixed(2)+' km' : Math.round(m)+' m';
+}
+function lerp(a, b, t) { return a + (b - a) * t; }
+
+function manhattanSnap(lat, lng) {
+  // Snap to nearest Manhattan grid intersection
+  return [
+    Math.round(lat / GRID_LAT) * GRID_LAT,
+    Math.round(lng / GRID_LNG) * GRID_LNG
+  ];
+}
+
+function edgeCount(n) { return n * (n - 1) / 2; }
+
+// =============================================
+// NODE GENERATION — snapped to Manhattan grid
+// =============================================
+function generateNodes() {
+  NUM_NODES = parseInt(document.getElementById('node-count').value);
+  const used = new Set();
+  nodes = [];
+
+  // Cluster centers (real Manhattan intersections)
+  const clusterCenters = [
+    [40.7549, -73.984],  // Midtown W
+    [40.7480, -73.975],  // Murray Hill
+    [40.7390, -73.989],  // Flatiron
+    [40.7282, -73.994],  // West Village
+    [40.7220, -74.000],  // SoHo/Tribeca
+    [40.7615, -73.978],  // UES 60s
+    [40.7370, -74.003],  // Chelsea W
+    [40.7455, -73.994],  // Penn Station area
+  ];
+
+  let attempts = 0;
+  while (nodes.length < NUM_NODES && attempts < 2000) {
+    attempts++;
+    // Pick a cluster center with jitter
+    const center = clusterCenters[Math.floor(Math.random() * clusterCenters.length)];
+    const rawLat = center[0] + rnd(-0.012, 0.012);
+    const rawLng = center[1] + rnd(-0.008, 0.008);
+    // Snap to grid
+    const [lat, lng] = manhattanSnap(rawLat, rawLng);
+    // Clamp to bounds
+    if (lat < NODE_BOUNDS.minLat || lat > NODE_BOUNDS.maxLat) continue;
+    if (lng < NODE_BOUNDS.minLng || lng > NODE_BOUNDS.maxLng) continue;
+    const key = `${lat.toFixed(4)},${lng.toFixed(4)}`;
+    if (used.has(key)) continue;
+    used.add(key);
+    nodes.push([lat, lng]);
+  }
+  nodes = nodes.slice(0, NUM_NODES);
+}
+
+// =============================================
+// OSRM ROUTE FETCHING
+// =============================================
+async function fetchRoute(i, j) {
+  const k = edgeKey(i, j);
+  if (roadCache[k]) return roadCache[k];
+
+  const [la, loa] = nodes[i];
+  const [lb, lob] = nodes[j];
+  const url = `${OSRM_BASE}/${loa},${la};${lob},${lb}?overview=full&geometries=geojson&steps=false`;
+
+  try {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const data = await r.json();
+    if (!data.routes || data.routes.length === 0) throw new Error('No route');
+
+    const route = data.routes[0];
+    const dist  = route.distance; // metres
+    // GeoJSON coords are [lng, lat], convert to [lat, lng] for Leaflet
+    const coords = route.geometry.coordinates.map(([ln, lt]) => [lt, ln]);
+    roadCache[k] = { dist, coords };
+    return roadCache[k];
+  } catch(e) {
+    // Fallback: straight line with haversine distance
+    const R = 6371e3;
+    const f1 = la*Math.PI/180, f2 = lb*Math.PI/180;
+    const df = (lb-la)*Math.PI/180, dl = (lob-loa)*Math.PI/180;
+    const s  = Math.sin(df/2)**2 + Math.cos(f1)*Math.cos(f2)*Math.sin(dl/2)**2;
+    const dist = R * 2 * Math.atan2(Math.sqrt(s), Math.sqrt(1-s));
+    roadCache[k] = { dist, coords: [nodes[i], nodes[j]] };
+    return roadCache[k];
+  }
+}
+
+async function prefetchAllRoutes() {
+  const total = edgeCount(NUM_NODES);
+  const overlay = document.getElementById('loading-overlay');
+  const bar     = document.getElementById('loading-bar');
+  const detail  = document.getElementById('loading-detail');
+  const eta     = document.getElementById('loading-eta');
+  overlay.classList.remove('hidden');
+  setStatus('loading', 'Fetching Routes…');
+
+  let done = 0;
+  const startTime = Date.now();
+
+  // Fetch in batches of 6 to respect rate limits
+  const BATCH = 6;
+  const pairs = [];
+  for (let i = 0; i < NUM_NODES; i++)
+    for (let j = i+1; j < NUM_NODES; j++)
+      pairs.push([i, j]);
+
+  for (let b = 0; b < pairs.length; b += BATCH) {
+    const batch = pairs.slice(b, b + BATCH);
+    await Promise.all(batch.map(([i,j]) => fetchRoute(i, j)));
+    done += batch.length;
+
+    const pct = Math.round((done / total) * 100);
+    bar.style.width = pct + '%';
+    detail.textContent = `Route ${done} / ${total} fetched`;
+
+    const elapsed = (Date.now() - startTime) / 1000;
+    const rate    = done / elapsed;
+    const remaining = Math.round((total - done) / Math.max(rate, 0.1));
+    eta.textContent  = remaining > 3 ? `~${remaining}s remaining` : '';
+
+    // Small delay between batches to be a good API citizen
+    if (b + BATCH < pairs.length) await sleep(80);
+  }
+
+  overlay.classList.add('hidden');
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+function getRoadDist(i, j) {
+  const k = edgeKey(i, j);
+  return roadCache[k] ? roadCache[k].dist : Infinity;
+}
+
+function getRouteCoords(i, j) {
+  const k = edgeKey(i, j);
+  return roadCache[k] ? roadCache[k].coords : [nodes[i], nodes[j]];
+}
+
+function routeTotalDist(route) {
+  let d = 0;
+  for (let i = 0; i < route.length; i++)
+    d += getRoadDist(route[i], route[(i+1) % route.length]);
+  return d;
+}
+
+// =============================================
+// MAP INIT
+// =============================================
+function initMaps() {
+  if (mapG) { mapG.remove(); mapG = null; }
+  if (mapA) { mapA.remove(); mapA = null; }
+
+  const tile    = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
+  const tileOpt = { attribution:'© OSM © CARTO', subdomains:'abcd', maxZoom:19 };
+
+  mapG = L.map('map-greedy', { zoomControl:true }).setView(CENTER, ZOOM);
+  L.tileLayer(tile, tileOpt).addTo(mapG);
+
+  mapA = L.map('map-aco', { zoomControl:true }).setView(CENTER, ZOOM);
+  L.tileLayer(tile, tileOpt).addTo(mapA);
+
+  let syncing = false;
+  function sync(src, tgt) {
+    src.on('moveend', () => {
+      if (syncing) return; syncing = true;
+      tgt.setView(src.getCenter(), src.getZoom(), {animate:false});
+      syncing = false;
+    });
+  }
+  sync(mapG, mapA); sync(mapA, mapG);
+}
+
+// =============================================
+// PLACE MARKERS
+// =============================================
+function placeMarkers() {
+  (gState.markers||[]).forEach(m => m.remove());
+  (aState.markers||[]).forEach(m => m.remove());
+  gState.markers = [];
+  aState.markers = [];
+
+  const style = { radius:6, fillColor:'#c8cfe0', color:'#0a0c10', weight:1.5, opacity:1, fillOpacity:0.9 };
+  nodes.forEach((coord, idx) => {
+    const gm = L.circleMarker(coord, {...style}).addTo(mapG);
+    const am = L.circleMarker(coord, {...style}).addTo(mapA);
+    // Tooltip with node index
+    gm.bindTooltip(`#${idx}`, {permanent:false, direction:'top', className:'', offset:[0,-4]});
+    am.bindTooltip(`#${idx}`, {permanent:false, direction:'top', className:'', offset:[0,-4]});
+    gState.markers.push(gm);
+    aState.markers.push(am);
+  });
+}
+
+// =============================================
+// STATUS HELPER
+// =============================================
+function setStatus(mode, text) {
+  const dot  = document.getElementById('status-dot');
+  const span = document.getElementById('status-text');
+  dot.className = mode; // 'active' | 'loading' | ''
+  span.textContent = text;
+}
+
+// =============================================
+// GREEDY — with animated cursor + real-road polylines
+// =============================================
+function initGreedy() {
+  (gState.scanLines  ||[]).forEach(l => l.remove());
+  (gState.builtLines ||[]).forEach(l => l.remove());
+  (gState.bestLines  ||[]).forEach(l => l.remove());
+  if (gState.cursorMarker) gState.cursorMarker.remove();
+  if (gState.prospectLine) gState.prospectLine.remove();
+
+  const startNode = 0;
+  gState = {
+    markers:     gState.markers,
+    scanLines:   [],
+    builtLines:  [],
+    bestLines:   [],
+    cursorMarker: null,
+    prospectLine: null,
+
+    visitedOrder: [startNode],
+    unvisited:    Array.from({length: NUM_NODES}, (_, i) => i).filter(i => i !== startNode),
+    currentNode:  startNode,
+    totalEdgesChecked: 0,
+    builtDist:    0,
+    bestDist:     Infinity,
+    bestRoute:    [],
+    phase:        'scan',
+
+    // Travel along road geometry
+    travelCoords:   [],
+    travelSegIdx:   0,
+    travelProgress: 1,
+    _movingToNode:  null,
+
+    scanTargets: [],
+    scanIdx:     0,
+
+    optI: 1, optJ: 2,
+    optRoute: [],
+
+    done: false
+  };
+
+  const cursorIcon = L.divIcon({
+    className: '',
+    html: '<div class="greedy-cursor-dot"></div>',
+    iconSize: [10,10], iconAnchor:[5,5]
+  });
+  gState.cursorMarker = L.marker(nodes[startNode], { icon: cursorIcon, zIndexOffset:2000 }).addTo(mapG);
+  gState.markers[startNode].setStyle({ fillColor:'#ff3b5c', color:'#ff3b5c', radius:8 });
+
+  document.getElementById('g-phase').textContent  = 'Constructing';
+  document.getElementById('g-nodes').textContent  = `1 / ${NUM_NODES}`;
+}
+
+function stepGreedy() {
+  if (gState.done) return;
+  const speed = parseInt(document.getElementById('greedy-speed').value);
+
+  if (gState.phase === 'travel') {
+    _greedyTravelRoad(speed);
+  } else if (gState.phase === 'scan') {
+    _greedyScan();
+  } else if (gState.phase === 'optimize') {
+    _greedyOptimize(speed);
+  }
+  _updateGreedyStats();
+}
+
+function _greedyTravelRoad(speed) {
+  const travelSpeed = 0.03 + speed * 0.018;
+  const coords = gState.travelCoords;
+  if (!coords || coords.length < 2) {
+    _greedyArriveNode();
+    return;
+  }
+
+  gState.travelProgress += travelSpeed;
+
+  // Find current segment
+  const totalSegs = coords.length - 1;
+  const globalT   = gState.travelProgress;
+  if (globalT >= 1) {
+    // Arrived
+    gState.cursorMarker.setLatLng(coords[coords.length - 1]);
+    _greedyArriveNode();
+    return;
+  }
+
+  // Interpolate position along polyline
+  const segT   = globalT * totalSegs;
+  const segIdx = Math.min(Math.floor(segT), totalSegs - 1);
+  const frac   = segT - segIdx;
+  const from   = coords[segIdx];
+  const to     = coords[segIdx + 1];
+  gState.cursorMarker.setLatLng([lerp(from[0], to[0], frac), lerp(from[1], to[1], frac)]);
+}
+
+function _greedyArriveNode() {
+  const destNode = gState._movingToNode;
+  if (destNode == null) {
+    gState.phase = 'scan';
+    gState.scanIdx = 0;
+    _buildScanTargets();
+    return;
+  }
+
+  const fromNode = gState.currentNode;
+  const roadCoords = getRouteCoords(fromNode, destNode);
+
+  // Draw permanent road-following edge
+  const line = L.polyline(roadCoords, {
+    color:'#ff3b5c', weight:3, opacity:0.85
+  }).addTo(mapG);
+  gState.builtLines.push(line);
+
+  gState.builtDist   += getRoadDist(fromNode, destNode);
+  gState.currentNode  = destNode;
+  gState.unvisited    = gState.unvisited.filter(x => x !== destNode);
+  gState.visitedOrder.push(destNode);
+  gState.markers[destNode].setStyle({ fillColor:'#ff8fa3', color:'#ff3b5c', radius:6 });
+  gState._movingToNode = null;
+
+  document.getElementById('g-nodes').textContent = `${gState.visitedOrder.length} / ${NUM_NODES}`;
+
+  if (gState.unvisited.length === 0) {
+    _greedyFinishTour();
+    return;
+  }
+
+  gState.phase   = 'scan';
+  gState.scanIdx = 0;
+  _buildScanTargets();
+}
+
+function _greedyFinishTour() {
+  // Close loop: return to node 0
+  const last = gState.currentNode;
+  const returnCoords = getRouteCoords(last, 0);
+  const returnDist   = getRoadDist(last, 0);
+  const line = L.polyline(returnCoords, {
+    color:'#ff3b5c', weight:2.5, opacity:0.6, dashArray:'6,3'
+  }).addTo(mapG);
+  gState.builtLines.push(line);
+  gState.builtDist += returnDist;
+
+  const total = routeTotalDist(gState.visitedOrder);
+  if (total < gState.bestDist) {
+    gState.bestDist  = total;
+    gState.bestRoute = [...gState.visitedOrder];
+    _drawGreedyBest();
+  }
+
+  gState.optRoute = [...gState.bestRoute];
+  gState.optI = 1; gState.optJ = 2;
+  gState.phase = 'optimize';
+  document.getElementById('g-phase').textContent = '2-Opt Refining';
+}
+
+function _buildScanTargets() {
+  gState.scanLines.forEach(l => l.remove()); gState.scanLines = [];
+  if (gState.prospectLine) { gState.prospectLine.remove(); gState.prospectLine = null; }
+
+  const pool = [...gState.unvisited];
+  const sampleSize = Math.min(pool.length, 5);
+  for (let i = pool.length-1; i > 0; i--) {
+    const j = Math.floor(Math.random()*(i+1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+  gState.scanTargets = pool.slice(0, sampleSize);
+}
+
+function _greedyScan() {
+  const speed = parseInt(document.getElementById('greedy-speed').value);
+  const scansPerStep = Math.max(1, Math.floor(speed * 0.5));
+
+  for (let s = 0; s < scansPerStep; s++) {
+    if (gState.scanIdx >= gState.scanTargets.length) {
+      // Pick nearest by road distance
+      gState.scanLines.forEach(l => l.remove()); gState.scanLines = [];
+      if (gState.prospectLine) { gState.prospectLine.remove(); gState.prospectLine = null; }
+
+      let bestDist = Infinity, bestNode = -1;
+      gState.unvisited.forEach(j => {
+        const d = getRoadDist(gState.currentNode, j);
+        if (d < bestDist) { bestDist = d; bestNode = j; }
+        gState.totalEdgesChecked++;
+      });
+
+      // Start road travel
+      const coords = getRouteCoords(gState.currentNode, bestNode);
+      gState.travelCoords   = coords;
+      gState.travelProgress = 0;
+      gState._movingToNode  = bestNode;
+      gState.phase          = 'travel';
+      return;
+    }
+
+    const candidate = gState.scanTargets[gState.scanIdx];
+    gState.totalEdgesChecked++;
+
+    // Use real road geometry for scan visualization
+    const roadCoords = getRouteCoords(gState.currentNode, candidate);
+
+    const scanLine = L.polyline(roadCoords, {
+      color:'#ff3b5c', weight:1, opacity:0.15, dashArray:'4,4'
+    }).addTo(mapG);
+    gState.scanLines.push(scanLine);
+
+    if (gState.prospectLine) gState.prospectLine.remove();
+    gState.prospectLine = L.polyline(roadCoords, {
+      color:'#ffb800', weight:1.8, opacity:0.65, dashArray:'5,4'
+    }).addTo(mapG);
+
+    gState.scanIdx++;
+    if (gState.scanLines.length > 4) { gState.scanLines[0].remove(); gState.scanLines.shift(); }
+  }
+}
+
+function _greedyOptimize(speed) {
+  const route = gState.optRoute;
+  const n     = route.length;
+  const steps = Math.max(1, speed * 3);
+
+  const i = gState.optI, j = gState.optJ;
+  if (gState.prospectLine) { gState.prospectLine.remove(); gState.prospectLine = null; }
+  if (i < n && j < n) {
+    const optCoords = getRouteCoords(route[i], route[j]);
+    gState.prospectLine = L.polyline(optCoords, {
+      color:'#ffb800', weight:1.2, opacity:0.45, dashArray:'3,3'
+    }).addTo(mapG);
+  }
+
+  for (let s = 0; s < steps; s++) {
+    const ii = gState.optI, jj = gState.optJ;
+    if (ii >= n - 1) {
+      const newDist = routeTotalDist(gState.optRoute);
+      if (newDist < gState.bestDist - 0.5) {
+        gState.bestDist  = newDist;
+        gState.bestRoute = [...gState.optRoute];
+        _drawGreedyBest();
+        gState.optI = 1; gState.optJ = 2;
+      } else {
+        gState.done  = true;
+        gState.phase = 'done';
+        document.getElementById('g-phase').textContent = 'Complete ✓';
+        if (gState.prospectLine) { gState.prospectLine.remove(); gState.prospectLine = null; }
+        gState.scanLines.forEach(l => l.remove()); gState.scanLines = [];
+        checkBothDone();
+        return;
+      }
+    }
+
+    const a = route[ii-1], b = route[ii], c = route[jj], d = route[(jj+1) % n];
+    if (a == null || b == null || c == null || d == null) { gState.optJ++; if (gState.optJ >= n) { gState.optI++; gState.optJ = gState.optI+1; } continue; }
+    const d1 = getRoadDist(a, b) + getRoadDist(c, d);
+    const d2 = getRoadDist(a, c) + getRoadDist(b, d);
+    gState.totalEdgesChecked++;
+
+    if (d2 < d1 - 0.5) {
+      let lo = ii, hi = jj;
+      while (lo < hi) { [route[lo], route[hi]] = [route[hi], route[lo]]; lo++; hi--; }
+      const nd = routeTotalDist(route);
+      if (nd < gState.bestDist) {
+        gState.bestDist  = nd;
+        gState.bestRoute = [...route];
+        _drawGreedyBest();
+        gState.cursorMarker.setLatLng(nodes[route[ii]]);
+      }
+    }
+
+    gState.optJ++;
+    if (gState.optJ >= n) { gState.optI++; gState.optJ = gState.optI + 1; }
+  }
+}
+
+function _drawGreedyBest() {
+  gState.bestLines.forEach(p => p.remove()); gState.bestLines = [];
+  const r = gState.bestRoute;
+  for (let i = 0; i < r.length; i++) {
+    const coords = getRouteCoords(r[i], r[(i+1) % r.length]);
+    gState.bestLines.push(L.polyline(coords, {
+      color:'#ff3b5c', weight:4, opacity:0.95
+    }).addTo(mapG));
+  }
+}
+
+function _updateGreedyStats() {
+  document.getElementById('g-edges').textContent   = gState.totalEdgesChecked.toLocaleString();
+  document.getElementById('g-current').textContent = fmt(gState.builtDist);
+  document.getElementById('g-best').textContent    = fmt(gState.bestDist);
+}
+
+// =============================================
+// ACO — real road distances + best-route road polylines
+// =============================================
+function initACO() {
+  Object.values(aState.edgeLines||{}).forEach(l => l.remove());
+  (aState.bestLines   ||[]).forEach(l => l.remove());
+  (aState.agentMarkers||[]).forEach(m => m.remove());
+
+  const phero = {};
+  const edgeLines = {};
+  for (let i = 0; i < NUM_NODES; i++) {
+    for (let j = i+1; j < NUM_NODES; j++) {
+      const k = edgeKey(i, j);
+      phero[k] = 0.1;
+      // Use actual road geometry for pheromone trails
+      const roadCoords = getRouteCoords(i, j);
+      edgeLines[k] = L.polyline(roadCoords, {
+        color:'#00e5a0', weight:0.4, opacity:0.04
+      }).addTo(mapA);
+    }
+  }
+
+  aState = {
+    markers:      aState.markers,
+    edgeLines,
+    pheromones:   phero,
+    agents:       [],
+    agentMarkers: [],
+    bestDist:     Infinity,
+    bestRoute:    [],
+    bestLines:    [],
+    iterations:   0,
+    convergence:  0,
+    done:         false
+  };
+
+  const maxIter = Math.max(100, NUM_NODES * 10);
+  aState.maxIter = maxIter;
+
+  for (let k = 0; k < NUM_AGENTS; k++) {
+    const startNode = Math.floor(Math.random() * NUM_NODES);
+    const firstTarget = Math.floor(Math.random() * NUM_NODES);
+    const agent = {
+      id: k,
+      color: AGENT_COLORS[k % AGENT_COLORS.length],
+      currentNode: startNode,
+      targetNode:  -1,
+      visitedNodes:[startNode],
+      unvisited:   Array.from({length:NUM_NODES},(_,i)=>i).filter(i=>i!==startNode),
+      pathDist:    0,
+      // Road-following travel state
+      travelCoords:   [],   // [[lat,lng]...] road geometry to target
+      travelProgress: 1,    // 0..1 across total polyline length
+      lat: nodes[startNode][0],
+      lng: nodes[startNode][1]
+    };
+    agent.targetNode = _acoPickNext(agent);
+    // Pre-load road coords for first leg
+    if (agent.targetNode >= 0) {
+      agent.travelCoords   = getRouteCoords(agent.currentNode, agent.targetNode);
+      agent.travelProgress = 0;
+    }
+
+    const icon = L.divIcon({
+      className: '',
+      html: `<div class="agent-dot" style="width:8px;height:8px;background:${agent.color};box-shadow:0 0 8px ${agent.color};"></div>`,
+      iconSize:[8,8], iconAnchor:[4,4]
+    });
+    aState.agents.push(agent);
+    aState.agentMarkers.push(L.marker([agent.lat,agent.lng],{icon,zIndexOffset:1000}).addTo(mapA));
+  }
+  document.getElementById('a-agents').textContent = NUM_AGENTS;
+}
+
+function _acoPickNext(agent) {
+  if (agent.unvisited.length === 0) return -1;
+  const alpha=1.2, beta=2.5;
+  const cur = agent.currentNode;
+  const weights = agent.unvisited.map(j => {
+    const p = aState.pheromones[edgeKey(cur,j)] || 0.01;
+    const d = getRoadDist(cur, j);
+    return Math.pow(p, alpha) * Math.pow(1 / Math.max(d, 1), beta);
+  });
+  const total = weights.reduce((a,b)=>a+b, 0);
+  if (total === 0) return agent.unvisited[0];
+  let r = Math.random() * total;
+  for (let i = 0; i < weights.length; i++) { r -= weights[i]; if (r <= 0) return agent.unvisited[i]; }
+  return agent.unvisited[agent.unvisited.length - 1];
+}
+
+function stepACO() {
+  if (aState.done) return;
+  const speed    = parseInt(document.getElementById('sim-speed').value);
+  const evapRate = parseInt(document.getElementById('evap-rate').value);
+  const stepSize = 0.025 + speed * 0.006;
+
+  aState.agents.forEach((agent, k) => {
+    if (agent.targetNode === -1) return;
+
+    agent.travelProgress += stepSize;
+
+    if (agent.travelProgress >= 1) {
+      // Arrived at target node
+      agent.travelProgress = 0;
+      agent.pathDist      += getRoadDist(agent.currentNode, agent.targetNode);
+      agent.visitedNodes.push(agent.targetNode);
+      agent.unvisited      = agent.unvisited.filter(x => x !== agent.targetNode);
+      agent.currentNode    = agent.targetNode;
+      agent.lat = nodes[agent.currentNode][0];
+      agent.lng = nodes[agent.currentNode][1];
+
+      if (agent.unvisited.length === 0) {
+        // Tour complete — deposit pheromones
+        const returnDist = getRoadDist(agent.currentNode, agent.visitedNodes[0]);
+        agent.pathDist  += returnDist;
+        const deposit    = 10000 / agent.pathDist;
+        const route      = agent.visitedNodes;
+        for (let i = 0; i < route.length; i++) {
+          const k2 = edgeKey(route[i], route[(i+1)%route.length]);
+          aState.pheromones[k2] = (aState.pheromones[k2]||0) + deposit;
+        }
+        if (agent.pathDist < aState.bestDist) {
+          aState.bestDist  = agent.pathDist;
+          aState.bestRoute = [...route];
+          _drawACOBest();
+        }
+        aState.iterations++;
+        document.getElementById('a-iters').textContent = aState.iterations;
+
+        // Respawn at random node
+        const s = Math.floor(Math.random() * NUM_NODES);
+        agent.currentNode  = s;
+        agent.visitedNodes = [s];
+        agent.unvisited    = Array.from({length:NUM_NODES},(_,i)=>i).filter(i=>i!==s);
+        agent.pathDist     = 0;
+        agent.lat = nodes[s][0]; agent.lng = nodes[s][1];
+        agent.targetNode   = _acoPickNext(agent);
+        agent.travelCoords   = agent.targetNode >= 0 ? getRouteCoords(agent.currentNode, agent.targetNode) : [];
+        agent.travelProgress = 0;
+      } else {
+        agent.targetNode     = _acoPickNext(agent);
+        agent.travelCoords   = agent.targetNode >= 0 ? getRouteCoords(agent.currentNode, agent.targetNode) : [];
+        agent.travelProgress = 0;
+      }
+    } else {
+      // Interpolate position along road polyline geometry
+      const coords = agent.travelCoords;
+      if (coords && coords.length >= 2) {
+        const totalSegs = coords.length - 1;
+        const segT      = agent.travelProgress * totalSegs;
+        const segIdx    = Math.min(Math.floor(segT), totalSegs - 1);
+        const frac      = segT - segIdx;
+        const fromPt    = coords[segIdx];
+        const toPt      = coords[segIdx + 1];
+        agent.lat = lerp(fromPt[0], toPt[0], frac);
+        agent.lng = lerp(fromPt[1], toPt[1], frac);
+      }
+    }
+    if (aState.agentMarkers[k]) aState.agentMarkers[k].setLatLng([agent.lat, agent.lng]);
+  });
+
+  // Evaporation
+  const evapFactor = 1 - (evapRate / 1000);
+  let maxP = 0;
+  Object.keys(aState.pheromones).forEach(k => {
+    aState.pheromones[k] = Math.max(0.001, aState.pheromones[k] * evapFactor);
+    if (aState.pheromones[k] > maxP) maxP = aState.pheromones[k];
+  });
+
+  // Update edge visuals (subset per frame)
+  const keys   = Object.keys(aState.pheromones);
+  const offset = Math.floor(Math.random() * keys.length);
+  const n      = Math.min(200, keys.length);
+  for (let i = 0; i < n; i++) {
+    const key  = keys[(offset+i) % keys.length];
+    const line = aState.edgeLines[key]; if (!line) continue;
+    const ratio = maxP > 0 ? aState.pheromones[key] / maxP : 0;
+    if      (ratio < 0.02) line.setStyle({weight:0.3, opacity:0.03});
+    else if (ratio < 0.1)  line.setStyle({weight:0.7, opacity:0.07+ratio*0.5});
+    else if (ratio < 0.4)  line.setStyle({weight:1.5, opacity:0.15+ratio*0.65});
+    else                   line.setStyle({weight:2.5+ratio*2.5, opacity:0.38+ratio*0.57});
+  }
+
+  const conv = Math.min(99, Math.floor((aState.iterations / aState.maxIter) * 100));
+  aState.convergence = conv;
+  document.getElementById('a-conv').textContent       = conv + '%';
+  document.getElementById('a-pheromone').textContent  = maxP.toFixed(2);
+  document.getElementById('a-best').textContent       = fmt(aState.bestDist);
+
+  if (aState.iterations >= aState.maxIter) {
+    aState.done = true;
+    document.getElementById('a-conv').textContent = '100%';
+    checkBothDone();
+  }
+}
+
+function _drawACOBest() {
+  aState.bestLines.forEach(p => p.remove()); aState.bestLines = [];
+  const r = aState.bestRoute;
+  for (let i = 0; i < r.length; i++) {
+    // Draw actual road geometry for best route
+    const coords = getRouteCoords(r[i], r[(i+1) % r.length]);
+    aState.bestLines.push(L.polyline(coords, {
+      color:'#00e5a0', weight:4, opacity:0.95
+    }).addTo(mapA));
+  }
+}
+
+// =============================================
+// MAIN LOOP
+// =============================================
+function startSimulation() {
+  if (running) return;
+  running = true;
+  document.getElementById('btn-start').textContent = '⏸ Running…';
+  document.getElementById('btn-start').disabled = true;
+  document.getElementById('btn-regen').disabled = true;
+  setStatus('active', 'Active');
+
+  let lastG = 0;
+  function loop(ts) {
+    if (!running) return;
+    const gSpeed    = parseInt(document.getElementById('greedy-speed').value);
+    const gInterval = Math.max(16, 120 / gSpeed);
+    if (!gState.done && ts - lastG > gInterval) { stepGreedy(); lastG = ts; }
+    if (!aState.done) { stepACO(); }
+    animFrame = requestAnimationFrame(loop);
+  }
+  animFrame = requestAnimationFrame(loop);
+}
+
+function stopSimulation() {
+  running = false;
+  if (animFrame) { cancelAnimationFrame(animFrame); animFrame = null; }
+  setStatus('', 'Ready');
+}
+
+function checkBothDone() {
+  if (gState.done && aState.done) {
+    stopSimulation();
+    document.getElementById('btn-start').textContent = '✓ Complete';
+    document.getElementById('status-dot').style.cssText = 'background:#ffb800;box-shadow:0 0 6px #ffb800';
+    document.getElementById('status-text').textContent = 'Converged';
+
+    // Print winner
+    const gd = gState.bestDist, ad = aState.bestDist;
+    if (isFinite(gd) && isFinite(ad)) {
+      const winner = ad < gd ? 'ACO' : 'Greedy';
+      const diff   = Math.abs(gd - ad);
+      console.log(`Winner: ${winner} by ${fmt(diff)}`);
+    }
+  }
+}
+
+function resetAll() {
+  stopSimulation();
+
+  (gState.scanLines  ||[]).forEach(l=>l.remove());
+  (gState.builtLines ||[]).forEach(l=>l.remove());
+  (gState.bestLines  ||[]).forEach(l=>l.remove());
+  if (gState.cursorMarker) gState.cursorMarker.remove();
+  if (gState.prospectLine) gState.prospectLine.remove();
+
+  Object.values(aState.edgeLines||{}).forEach(l=>l.remove());
+  (aState.bestLines   ||[]).forEach(l=>l.remove());
+  (aState.agentMarkers||[]).forEach(m=>m.remove());
+
+  const defStyle = {fillColor:'#c8cfe0',color:'#0a0c10',radius:6,fillOpacity:0.9,opacity:1,weight:1.5};
+  (gState.markers||[]).forEach(m=>m.setStyle(defStyle));
+  (aState.markers||[]).forEach(m=>m.setStyle(defStyle));
+
+  ['g-edges','g-current','g-best','g-nodes','g-phase',
+   'a-agents','a-iters','a-best','a-conv','a-pheromone'].forEach(id => {
+    const el = document.getElementById(id);
+    if (id==='g-nodes') el.textContent = `0 / ${NUM_NODES}`;
+    else if (id==='g-phase') el.textContent = 'Idle';
+    else if (id==='a-agents') el.textContent = '0';
+    else if (id==='a-pheromone') el.textContent = '0.00';
+    else if (id==='a-conv') el.textContent = '0%';
+    else el.textContent = (id==='g-edges'||id==='a-iters') ? '0' : '—';
+  });
+
+  document.getElementById('btn-start').textContent = '▶ Start';
+  document.getElementById('btn-start').disabled    = false;
+  document.getElementById('btn-regen').disabled    = false;
+  document.getElementById('status-dot').className  = '';
+  document.getElementById('status-dot').style.cssText = '';
+
+  const savedGM = gState.markers;
+  const savedAM = aState.markers;
+  gState = { markers: savedGM };
+  aState = { markers: savedAM };
+
+  initGreedy();
+  initACO();
+}
+
+async function regenNodes() {
+  stopSimulation();
+  roadCache = {};
+
+  // Disable controls during loading
+  document.getElementById('btn-start').disabled = true;
+  document.getElementById('btn-regen').disabled = true;
+  document.getElementById('btn-reset').disabled = true;
+
+  generateNodes();
+  placeMarkers();
+  await prefetchAllRoutes();
+  initGreedy();
+  initACO();
+
+  document.getElementById('btn-start').disabled = false;
+  document.getElementById('btn-regen').disabled = false;
+  document.getElementById('btn-reset').disabled = false;
+  setStatus('', 'Ready');
+}
+
+// =============================================
+// NODE COUNT SLIDER
+// =============================================
+function updateNodeHint() {
+  const n    = parseInt(document.getElementById('node-count').value);
+  const reqs = edgeCount(n);
+  document.getElementById('node-count-val').textContent = n;
+
+  const hint = document.getElementById('node-req-hint');
+  hint.textContent = `~${reqs} road requests`;
+  hint.className   = reqs > 300 ? 'danger' : reqs > 150 ? 'warn' : '';
+}
+
+// =============================================
+// BOOTSTRAP
+// =============================================
+window.addEventListener('load', async () => {
+  document.getElementById('node-count').addEventListener('input', updateNodeHint);
+  updateNodeHint();
+
+  initMaps();
+
+  await sleep(400); // let maps render
+  generateNodes();
+  placeMarkers();
+  await prefetchAllRoutes();
+
+  initGreedy();
+  initACO();
+
+  document.getElementById('btn-start').disabled = false;
+  document.getElementById('btn-regen').disabled = false;
+  document.getElementById('btn-reset').disabled = false;
+  setStatus('', 'Ready');
+
+  document.getElementById('btn-start').addEventListener('click', startSimulation);
+  document.getElementById('btn-reset').addEventListener('click', resetAll);
+  document.getElementById('btn-regen').addEventListener('click', regenNodes);
+});
+</script>
+</body>
+</html>
